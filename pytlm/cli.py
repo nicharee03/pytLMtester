@@ -200,9 +200,11 @@ to see why this happens and what you must do to prevent it."""
     _setup_logging(parsed.verbosity, parsed.log_file)
 
     # 处理模块
-    # handle_module(parsed.config.project_path + "\\" + parsed.config.module_name)
-    #
-    # parsed.config.module_name = parsed.config.module_name + "_d"
+    module_path = Path(parsed.config.project_path) / parsed.config.module_name
+
+    handle_module(str(module_path))
+
+    parsed.config.module_name = parsed.config.module_name + "_d"
 
     set_configuration(parsed.config)
     with console.status("Running Pynguin..."):

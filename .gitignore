@@ -11,4 +11,5 @@ pynguin-results/
 pynguin-report/
 
 # Misc
-*.log
+*.log__pycache__/
+*.pyc

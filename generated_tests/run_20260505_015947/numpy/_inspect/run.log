@@ -1,0 +1,759 @@
+content内容: 
+b'"""Subset of inspect module from upstream python\n\nWe use this instead of upstream because upstream inspect is slow to import, and\nsignificantly contributes to numpy import times. Importing this copy has almost\nno overhead.\n\n"""\nimport types\n\n__all__ = [\'getargspec\', \'formatargspec\']\n\n# ----------------------------------------------------------- type-checking\ndef ismethod(object):\n    """Return true if the object is an instance method.\n\n    Instance method objects provide these attributes:\n        __doc__         documentation string\n        __name__        name with which this method was defined\n        im_class        class object in which this method belongs\n        im_func         function object containing implementation of method\n        im_self         instance to which this method is bound, or None\n\n    """\n    return isinstance(object, types.MethodType)\n\ndef isfunction(object):\n    """Return true if the object is a user-defined function.\n\n    Function objects provide these attributes:\n        __doc__         documentation string\n        __name__        name with which this function was defined\n        func_code       code object containing compiled function bytecode\n        func_defaults   tuple of any default values for arguments\n        func_doc        (same as __doc__)\n        func_globals    global namespace in which this function was defined\n        func_name       (same as __name__)\n\n    """\n    return isinstance(object, types.FunctionType)\n\ndef iscode(object):\n    """Return true if the object is a code object.\n\n    Code objects provide these attributes:\n        co_argcount     number of arguments (not including * or ** args)\n        co_code         string of raw compiled bytecode\n        co_consts       tuple of constants used in the bytecode\n        co_filename     name of file in which this code object was created\n        co_firstlineno  number of first line in Python source code\n        co_flags        bitmap: 1=optimized | 2=newlocals | 4=*arg | 8=**arg\n        co_lnotab       encoded mapping of line numbers to bytecode indices\n        co_name         name with which this code object was defined\n        co_names        tuple of names of local variables\n        co_nlocals      number of local variables\n        co_stacksize    virtual machine stack space required\n        co_varnames     tuple of names of arguments and local variables\n\n    """\n    return isinstance(object, types.CodeType)\n\n\n# ------------------------------------------------ argument list extraction\n# These constants are from Python\'s compile.h.\nCO_OPTIMIZED, CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS = 1, 2, 4, 8\n\ndef getargs(co):\n    """Get information about the arguments accepted by a code object.\n\n    Three things are returned: (args, varargs, varkw), where \'args\' is\n    a list of argument names (possibly containing nested lists), and\n    \'varargs\' and \'varkw\' are the names of the * and ** arguments or None.\n\n    """\n\n    if not iscode(co):\n        raise TypeError(\'arg is not a code object\')\n\n    nargs = co.co_argcount\n    names = co.co_varnames\n    args = list(names[:nargs])\n\n    # The following acrobatics are for anonymous (tuple) arguments.\n    # Which we do not need to support, so remove to avoid importing\n    # the dis module.\n    for i in range(nargs):\n        if args[i][:1] in [\'\', \'.\']:\n            raise TypeError("tuple function arguments are not supported")\n    varargs = None\n    if co.co_flags & CO_VARARGS:\n        varargs = co.co_varnames[nargs]\n        nargs = nargs + 1\n    varkw = None\n    if co.co_flags & CO_VARKEYWORDS:\n        varkw = co.co_varnames[nargs]\n    return args, varargs, varkw\n\ndef getargspec(func):\n    """Get the names and default values of a function\'s arguments.\n\n    A tuple of four things is returned: (args, varargs, varkw, defaults).\n    \'args\' is a list of the argument names (it may contain nested lists).\n    \'varargs\' and \'varkw\' are the names of the * and ** arguments or None.\n    \'defaults\' is an n-tuple of the default values of the last n arguments.\n\n    """\n\n    if ismethod(func):\n        func = func.__func__\n    if not isfunction(func):\n        raise TypeError(\'arg is not a Python function\')\n    args, varargs, varkw = getargs(func.__code__)\n    return args, varargs, varkw, func.__defaults__\n\ndef getargvalues(frame):\n    """Get information about arguments passed into a particular frame.\n\n    A tuple of four things is returned: (args, varargs, varkw, locals).\n    \'args\' is a list of the argument names (it may contain nested lists).\n    \'varargs\' and \'varkw\' are the names of the * and ** arguments or None.\n    \'locals\' is the locals dictionary of the given frame.\n\n    """\n    args, varargs, varkw = getargs(frame.f_code)\n    return args, varargs, varkw, frame.f_locals\n\ndef joinseq(seq):\n    if len(seq) == 1:\n        return \'(\' + seq[0] + \',)\'\n    else:\n        return \'(\' + \', \'.join(seq) + \')\'\n\ndef strseq(object, convert, join=joinseq):\n    """Recursively walk a sequence, stringifying each element.\n\n    """\n    if type(object) in [list, tuple]:\n        return join([strseq(_o, convert, join) for _o in object])\n    else:\n        return convert(object)\n\ndef formatargspec(args, varargs=None, varkw=None, defaults=None,\n                  formatarg=str,\n                  formatvarargs=lambda name: \'*\' + name,\n                  formatvarkw=lambda name: \'**\' + name,\n                  formatvalue=lambda value: \'=\' + repr(value),\n                  join=joinseq):\n    """Format an argument spec from the 4 values returned by getargspec.\n\n    The first four arguments are (args, varargs, varkw, defaults).  The\n    other four arguments are the corresponding optional formatting functions\n    that are called to turn names and values into strings.  The ninth\n    argument is an optional function to format the sequence of arguments.\n\n    """\n    specs = []\n    if defaults:\n        firstdefault = len(args) - len(defaults)\n    for i in range(len(args)):\n        spec = strseq(args[i], formatarg, join)\n        if defaults and i >= firstdefault:\n            spec = spec + formatvalue(defaults[i - firstdefault])\n        specs.append(spec)\n    if varargs is not None:\n        specs.append(formatvarargs(varargs))\n    if varkw is not None:\n        specs.append(formatvarkw(varkw))\n    return \'(\' + \', \'.join(specs) + \')\'\n\ndef formatargvalues(args, varargs, varkw, locals,\n                    formatarg=str,\n                    formatvarargs=lambda name: \'*\' + name,\n                    formatvarkw=lambda name: \'**\' + name,\n                    formatvalue=lambda value: \'=\' + repr(value),\n                    join=joinseq):\n    """Format an argument spec from the 4 values returned by getargvalues.\n\n    The first four arguments are (args, varargs, varkw, locals).  The\n    next four arguments are the corresponding optional formatting functions\n    that are called to turn names and values into strings.  The ninth\n    argument is an optional function to format the sequence of arguments.\n\n    """\n    def convert(name, locals=locals,\n                formatarg=formatarg, formatvalue=formatvalue):\n        return formatarg(name) + formatvalue(locals[name])\n    specs = [strseq(arg, convert, join) for arg in args]\n\n    if varargs:\n        specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))\n    if varkw:\n        specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))\n    return \'(\' + \', \'.join(specs) + \')\'\n'
+[02:02:28] INFO     HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"                                                          _client.py:1026
+```python
+"""Subset of inspect module from upstream python
+
+We use this instead of upstream because upstream inspect is slow to import, and
+significantly contributes to numpy import times. Importing this copy has almost
+no overhead.
+
+"""
+import types
+
+__all__ = ['getargspec', 'formatargspec']
+
+# ----------------------------------------------------------- type-checking
+def ismethod(object: object) -> bool:
+    """Return true if the object is an instance method.
+
+    Instance method objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this method was defined
+        im_class        class object in which this method belongs
+        im_func         function object containing implementation of method
+        im_self         instance to which this method is bound, or None
+
+    """
+    return isinstance(object, types.MethodType)
+
+def isfunction(object: object) -> bool:
+    """Return true if the object is a user-defined function.
+
+    Function objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this function was defined
+        func_code       code object containing compiled function bytecode
+        func_defaults   tuple of any default values for arguments
+        func_doc        (same as __doc__)
+        func_globals    global namespace in which this function was defined
+        func_name       (same as __name__)
+
+    """
+    return isinstance(object, types.FunctionType)
+
+def iscode(object: object) -> bool:
+    """Return true if the object is a code object.
+
+    Code objects provide these attributes:
+        co_argcount     number of arguments (not including * or ** args)
+        co_code         string of raw compiled bytecode
+        co_consts       tuple of constants used in the bytecode
+        co_filename     name of file in which this code object was created
+        co_firstlineno  number of first line in Python source code
+        co_flags        bitmap: 1=optimized | 2=newlocals | 4=*arg | 8=**arg
+        co_lnotab       encoded mapping of line numbers to bytecode indices
+        co_name         name with which this code object was defined
+        co_names        tuple of names of local variables
+        co_nlocals      number of local variables
+        co_stacksize    virtual machine stack space required
+        co_varnames     tuple of names of arguments and local variables
+
+    """
+    return isinstance(object, types.CodeType)
+
+
+# ------------------------------------------------ argument list extraction
+# These constants are from Python's compile.h.
+CO_OPTIMIZED, CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS = 1, 2, 4, 8
+
+def getargs(co: types.CodeType) -> tuple:
+    """Get information about the arguments accepted by a code object.
+
+    Three things are returned: (args, varargs, varkw), where 'args' is
+    a list of argument names (possibly containing nested lists), and
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+
+    """
+
+    if not iscode(co):
+        raise TypeError('arg is not a code object')
+
+    nargs = co.co_argcount
+    names = co.co_varnames
+    args = list(names[:nargs])
+
+    # The following acrobatics are for anonymous (tuple) arguments.
+    # Which we do not need to support, so remove to avoid importing
+    # the dis module.
+    for i in range(nargs):
+        if args[i][:1] in ['', '.']:
+            raise TypeError("tuple function arguments are not supported")
+    varargs = None
+    if co.co_flags & CO_VARARGS:
+        varargs = co.co_varnames[nargs]
+        nargs = nargs + 1
+    varkw = None
+    if co.co_flags & CO_VARKEYWORDS:
+        varkw = co.co_varnames[nargs]
+    return args, varargs, varkw
+
+def getargspec(func: types.FunctionType) -> tuple:
+    """Get the names and default values of a function's arguments.
+
+    A tuple of four things is returned: (args, varargs, varkw, defaults).
+    'args' is a list of the argument names (it may contain nested lists).
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'defaults' is an n-tuple of the default values of the last n arguments.
+
+    """
+
+    if ismethod(func):
+        func = func.__func__
+    if not isfunction(func):
+        raise TypeError('arg is not a Python function')
+    args, varargs, varkw = getargs(func.__code__)
+    return args, varargs, varkw, func.__defaults__
+
+def getargvalues(frame: types.FrameType) -> tuple:
+    """Get information about arguments passed into a particular frame.
+
+    A tuple of four things is returned: (args, varargs, varkw, locals).
+    'args' is a list of the argument names (it may contain nested lists).
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'locals' is the locals dictionary of the given frame.
+
+    """
+    args, varargs, varkw = getargs(frame.f_code)
+    return args, varargs, varkw, frame.f_locals
+
+def joinseq(seq: list) -> str:
+    if len(seq) == 1:
+        return '(' + seq[0] + ',)'
+    else:
+        return '(' + ', '.join(seq) + ')'
+
+def strseq(object: object, convert: callable, join: callable = joinseq) -> str:
+    """Recursively walk a sequence, stringifying each element.
+
+    """
+    if type(object) in [list, tuple]:
+        return join([strseq(_o, convert, join) for _o in object])
+    else:
+        return convert(object)
+
+def formatargspec(args: list, varargs: str = None, varkw: str = None, defaults: tuple = None,
+                  formatarg: callable = str,
+                  formatvarargs: callable = lambda name: '*' + name,
+                  formatvarkw: callable = lambda name: '**' + name,
+                  formatvalue: callable = lambda value: '=' + repr(value),
+                  join: callable = joinseq) -> str:
+    """Format an argument spec from the 4 values returned by getargspec.
+
+    The first four arguments are (args, varargs, varkw, defaults).  The
+    other four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The ninth
+    argument is an optional function to format the sequence of arguments.
+
+    """
+    specs = []
+    if defaults:
+        firstdefault = len(args) - len(defaults)
+    for i in range(len(args)):
+        spec = strseq(args[i], formatarg, join)
+        if defaults and i >= firstdefault:
+            spec = spec + formatvalue(defaults[i - firstdefault])
+        specs.append(spec)
+    if varargs is not None:
+        specs.append(formatvarargs(varargs))
+    if varkw is not None:
+        specs.append(formatvarkw(varkw))
+    return '(' + ', '.join(specs) + ')'
+
+def formatargvalues(args: list, varargs: str, varkw: str, locals: dict,
+                    formatarg: callable = str,
+                    formatvarargs: callable = lambda name: '*' + name,
+                    formatvarkw: callable = lambda name: '**' + name,
+                    formatvalue: callable = lambda value: '=' + repr(value),
+                    join: callable = joinseq) -> str:
+    """Format an argument spec from the 4 values returned by getargvalues.
+
+    The first four arguments are (args, varargs, varkw, locals).  The
+    next four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The ninth
+    argument is an optional function to format the sequence of arguments.
+
+    """
+    def convert(name, locals=locals,
+                formatarg=formatarg, formatvalue=formatvalue):
+        return formatarg(name) + formatvalue(locals[name])
+    specs = [strseq(arg, convert, join) for arg in args]
+
+    if varargs:
+        specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))
+    if varkw:
+        specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))
+    return '(' + ', '.join(specs) + ')'
+```
+new_content内容: 
+"""Subset of inspect module from upstream python
+
+We use this instead of upstream because upstream inspect is slow to import, and
+significantly contributes to numpy import times. Importing this copy has almost
+no overhead.
+
+"""
+import types
+
+__all__ = ['getargspec', 'formatargspec']
+
+# ----------------------------------------------------------- type-checking
+def ismethod(object: object) -> bool:
+    """Return true if the object is an instance method.
+
+    Instance method objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this method was defined
+        im_class        class object in which this method belongs
+        im_func         function object containing implementation of method
+        im_self         instance to which this method is bound, or None
+
+    """
+    return isinstance(object, types.MethodType)
+
+def isfunction(object: object) -> bool:
+    """Return true if the object is a user-defined function.
+
+    Function objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this function was defined
+        func_code       code object containing compiled function bytecode
+        func_defaults   tuple of any default values for arguments
+        func_doc        (same as __doc__)
+        func_globals    global namespace in which this function was defined
+        func_name       (same as __name__)
+
+    """
+    return isinstance(object, types.FunctionType)
+
+def iscode(object: object) -> bool:
+    """Return true if the object is a code object.
+
+    Code objects provide these attributes:
+        co_argcount     number of arguments (not including * or ** args)
+        co_code         string of raw compiled bytecode
+        co_consts       tuple of constants used in the bytecode
+        co_filename     name of file in which this code object was created
+        co_firstlineno  number of first line in Python source code
+        co_flags        bitmap: 1=optimized | 2=newlocals | 4=*arg | 8=**arg
+        co_lnotab       encoded mapping of line numbers to bytecode indices
+        co_name         name with which this code object was defined
+        co_names        tuple of names of local variables
+        co_nlocals      number of local variables
+        co_stacksize    virtual machine stack space required
+        co_varnames     tuple of names of arguments and local variables
+
+    """
+    return isinstance(object, types.CodeType)
+
+
+# ------------------------------------------------ argument list extraction
+# These constants are from Python's compile.h.
+CO_OPTIMIZED, CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS = 1, 2, 4, 8
+
+def getargs(co: types.CodeType) -> tuple:
+    """Get information about the arguments accepted by a code object.
+
+    Three things are returned: (args, varargs, varkw), where 'args' is
+    a list of argument names (possibly containing nested lists), and
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+
+    """
+
+    if not iscode(co):
+        raise TypeError('arg is not a code object')
+
+    nargs = co.co_argcount
+    names = co.co_varnames
+    args = list(names[:nargs])
+
+    # The following acrobatics are for anonymous (tuple) arguments.
+    # Which we do not need to support, so remove to avoid importing
+    # the dis module.
+    for i in range(nargs):
+        if args[i][:1] in ['', '.']:
+            raise TypeError("tuple function arguments are not supported")
+    varargs = None
+    if co.co_flags & CO_VARARGS:
+        varargs = co.co_varnames[nargs]
+        nargs = nargs + 1
+    varkw = None
+    if co.co_flags & CO_VARKEYWORDS:
+        varkw = co.co_varnames[nargs]
+    return args, varargs, varkw
+
+def getargspec(func: types.FunctionType) -> tuple:
+    """Get the names and default values of a function's arguments.
+
+    A tuple of four things is returned: (args, varargs, varkw, defaults).
+    'args' is a list of the argument names (it may contain nested lists).
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'defaults' is an n-tuple of the default values of the last n arguments.
+
+    """
+
+    if ismethod(func):
+        func = func.__func__
+    if not isfunction(func):
+        raise TypeError('arg is not a Python function')
+    args, varargs, varkw = getargs(func.__code__)
+    return args, varargs, varkw, func.__defaults__
+
+def getargvalues(frame: types.FrameType) -> tuple:
+    """Get information about arguments passed into a particular frame.
+
+    A tuple of four things is returned: (args, varargs, varkw, locals).
+    'args' is a list of the argument names (it may contain nested lists).
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'locals' is the locals dictionary of the given frame.
+
+    """
+    args, varargs, varkw = getargs(frame.f_code)
+    return args, varargs, varkw, frame.f_locals
+
+def joinseq(seq: list) -> str:
+    if len(seq) == 1:
+        return '(' + seq[0] + ',)'
+    else:
+        return '(' + ', '.join(seq) + ')'
+
+def strseq(object: object, convert: callable, join: callable = joinseq) -> str:
+    """Recursively walk a sequence, stringifying each element.
+
+    """
+    if type(object) in [list, tuple]:
+        return join([strseq(_o, convert, join) for _o in object])
+    else:
+        return convert(object)
+
+def formatargspec(args: list, varargs: str = None, varkw: str = None, defaults: tuple = None,
+                  formatarg: callable = str,
+                  formatvarargs: callable = lambda name: '*' + name,
+                  formatvarkw: callable = lambda name: '**' + name,
+                  formatvalue: callable = lambda value: '=' + repr(value),
+                  join: callable = joinseq) -> str:
+    """Format an argument spec from the 4 values returned by getargspec.
+
+    The first four arguments are (args, varargs, varkw, defaults).  The
+    other four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The ninth
+    argument is an optional function to format the sequence of arguments.
+
+    """
+    specs = []
+    if defaults:
+        firstdefault = len(args) - len(defaults)
+    for i in range(len(args)):
+        spec = strseq(args[i], formatarg, join)
+        if defaults and i >= firstdefault:
+            spec = spec + formatvalue(defaults[i - firstdefault])
+        specs.append(spec)
+    if varargs is not None:
+        specs.append(formatvarargs(varargs))
+    if varkw is not None:
+        specs.append(formatvarkw(varkw))
+    return '(' + ', '.join(specs) + ')'
+
+def formatargvalues(args: list, varargs: str, varkw: str, locals: dict,
+                    formatarg: callable = str,
+                    formatvarargs: callable = lambda name: '*' + name,
+                    formatvarkw: callable = lambda name: '**' + name,
+                    formatvalue: callable = lambda value: '=' + repr(value),
+                    join: callable = joinseq) -> str:
+    """Format an argument spec from the 4 values returned by getargvalues.
+
+    The first four arguments are (args, varargs, varkw, locals).  The
+    next four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The ninth
+    argument is an optional function to format the sequence of arguments.
+
+    """
+    def convert(name, locals=locals,
+                formatarg=formatarg, formatvalue=formatvalue):
+        return formatarg(name) + formatvalue(locals[name])
+    specs = [strseq(arg, convert, join) for arg in args]
+
+    if varargs:
+        specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))
+    if varkw:
+        specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))
+    return '(' + ', '.join(specs) + ')'
+[02:02:29] INFO     Start Pynguin Test Generation…                                                                                                           generator.py:99
+           INFO     Using seed 1777942936945536762                                                                                                          generator.py:179
+           INFO     Collecting constants from SUT.                                                                                                          generator.py:186
+           ERROR    Mutation currently unsupported --- the OpenAI edit models throttle.                                                                     generator.py:235
+           INFO     Trying to set up the large language model.                                                                                              generator.py:238
+           INFO     Using strategy: Algorithm.DYNAMOSA                                                                                     generationalgorithmfactory.py:233
+           INFO     Instantiated 50 fitness functions                                                                                      generationalgorithmfactory.py:308
+           INFO     Using CoverageArchive                                                                                                  generationalgorithmfactory.py:270
+           INFO     Using large language model seeding                                                                                     generationalgorithmfactory.py:146
+           INFO     Using selection function: Selection.TOURNAMENT_SELECTION                                                               generationalgorithmfactory.py:252
+           INFO     Using crossover function: SinglePointRelativeCrossOver                                                                 generationalgorithmfactory.py:265
+           INFO     Using ranking function: RankBasedPreferenceSorting                                                                     generationalgorithmfactory.py:278
+<pynguin.testcase.execution.TestCaseExecutor object at 0x7f0de63d4ac0>
+           INFO     Start generating test cases                                                                                                             generator.py:390
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyT94ba7Y6d6hW6ujYsVs7Ix3k6k",
+  "object": "chat.completion",
+  "created": 1777942951,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Understanding Code Objects**: \n   - It might be hard to create valid code objects to test the `iscode` function, as they are low-level constructs in Python.\n\n2. **Creating Instance Methods**: \n   - Writing proper instance methods is required to test `ismethod`, which may involve understanding classes and instances.\n\n3. **Defining User-Defined Functions**: \n   - Creating various types of functions (normal, nested, etc.) can be complex, particularly to cover diverse cases for `isfunction`.\n\n4. **Testing with Different Object Types**: \n   - We need to ensure there are varied types of invalid inputs to confirm that the function correctly identifies whether an object is a code object.\n\n5. **Integration with Other Functions**: \n   - The `getargspec` and other related functions may need to be tested in tandem with `iscode`, making test case design more complicated.\n\n6. **Creating Edge Cases**: \n   - Edge cases, like empty functions, functions with no arguments, and those with default arguments must be considered so that all scenarios are tested.\n\n7. **Performance Testing**: \n   - Since this module aims to provide faster alternatives, it would be important to assess how it performs compared to upstream.\n\n8. **Environment Setup**:\n   - Ensuring the correct environment for running tests (e.g., Python version compatibility) can introduce further complications.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1901,
+    "completion_tokens": 291,
+    "total_tokens": 2192,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:02:40] INFO     Initial Population, Coverage: 0.020000                                                                                              searchobserver.py:68
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyTL7RwYOAE6l5Pc7P4Rs3zeRzrl",
+  "object": "chat.completion",
+  "created": 1777942963,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Complex Input Types**: The functions deal with various input types like functions, methods, and code objects. Creating test cases for each type can be complicated.\n\n2. **Argument Variance**: Functions can have different types of arguments (positional, keyword, variable-length). Each case needs separate tests to ensure proper handling.\n\n3. **Default Values**: Handling default argument values requires additional cases, especially for functions with varying numbers of defaults.\n\n4. **Locals Dictionary**: Testing the locals dictionary in `formatargvalues` needs to ensure that the correct values are fetched for the variable arguments.\n\n5. **Formatting Functions**: The custom formatting functions provided as parameters can alter the output significantly. Testing different formatting functions can increase complexity.\n\n6. **Edge Cases**: Functions with no arguments, functions that only accept `*args` or `**kwargs`, and others like recursive arguments could be challenging to test correctly.\n\n7. **Error Handling**: Ensuring that the proper exceptions are raised when incorrect types are passed to the functions can be overlooked in tests.\n\n8. **Output Consistency**: The format of the output string must be verified for consistency across different configurations of the function arguments.\n\n9. **Dependency on Frame Objects**: In `getargvalues`, providing appropriate frame objects for testing can be difficult as they require a specific context during execution.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1903,
+    "completion_tokens": 280,
+    "total_tokens": 2183,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:03:11] INFO     Initial Population, Coverage: 0.020000                                                                                              searchobserver.py:68
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyTqd3byAxpZrBv2XnNyhFvW3qG5",
+  "object": "chat.completion",
+  "created": 1777942994,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Understanding Function Types**: We need to ensure that we create proper function objects to test. There are many types of callable objects (like lambdas, built-in functions) that may not qualify as user-defined functions.\n\n2. **Creating Various Test Scenarios**: There should be clear differentiation between user-defined functions and non-function objects (e.g., built-in functions, methods, classes, etc.). We need a variety of test cases to cover these scenarios.\n\n3. **Edge Cases**: It's important to handle edge cases effectively, such as testing with None, numbers, strings, or instances of classes that might mimic functions.\n\n4. **Python Versions**: Different Python versions might have slight variations in how these types are defined. Ensuring compatibility across versions can add complexity.\n\n5. **Isolating the Tests**: We need to ensure that the tests do not have side effects, especially if functions modify the state or have side effects on the underlying system.\n\n6. **Running Tests**: We must have a framework for running these tests (like pytest or unittest), and making sure all dependencies are well managed during the testing process.\n\n7. **Expected Outputs**: Clearly defining what the expected output is for each test case can be challenging, especially with more complex function types and behaviors.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1901,
+    "completion_tokens": 265,
+    "total_tokens": 2166,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:03:23] INFO     Initial Population, Coverage: 0.020000                                                                                              searchobserver.py:68
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyU2S9EhcbWfjv4uDluUnE7zWzCn",
+  "object": "chat.completion",
+  "created": 1777943006,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Complex Input Types**: The `getargvalues` function takes a frame object. Creating a frame object for testing can be complex and requires a deep understanding of Python's stack frames.\n\n2. **Variadic Arguments**: Functions with variable arguments (*args and **kwargs) need to be handled correctly in tests to ensure they return expected results.\n\n3. **Default Values**: Functions with default argument values need special attention to verify that `defaults` are captured and formatted properly.\n\n4. **Nested Functions**: Testing functions nested inside other functions may lead to complications in accessing the correct frame when calling `getargvalues`.\n\n5. **Output Formatting**: Ensuring that the output format of the arguments matches expectations requires thorough testing for string formatting functions.\n\n6. **Compatibility Issues**: The Python version used during testing may affect the behavior of some features, especially if using newer language constructs.\n\n7. **Edge Cases**: Special cases, such as no arguments, or functions with only `*args` or `**kwargs`, may not behave as expected and need specific test cases.\n\n8. **Error Handling**: Tests must include scenarios where invalid inputs (non-code objects or non-function objects) trigger appropriate exceptions.\n\n9. **Performance Considerations**: The function's performance should be tested, especially since the purpose of this module is to improve import speed.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1903,
+    "completion_tokens": 279,
+    "total_tokens": 2182,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:03:43] INFO     Initial Population, Coverage: 0.080000                                                                                              searchobserver.py:68
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyULMt7wGjY7CCfCsXggaiFkqspn",
+  "object": "chat.completion",
+  "created": 1777943025,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Function Definitions**: Creating user-defined functions for testing `isfunction` can be tricky, especially if we need to ensure they are not built-in or lambda functions, which may require specific handling.\n\n2. **Method vs Function**: Distinguishing between function objects and instance methods could complicate tests; instance methods should return `False` for `isfunction`, but they might appear similar.\n\n3. **Edge Cases**: Testing with edge cases, such as nested functions, decorators, or functions with unusual attributes, may lead to unexpected results.\n\n4. **Mocking Types**: If we want to test `isfunction` with mock objects or types, we must be careful to replicate the behavior of function types accurately.\n\n5. **Error Handling**: Ensuring that `isfunction` handles unexpected inputs correctly, such as non-function types, may require additional test cases.\n\n6. **Python Version Differences**: The behavior of functions and methods may vary between Python versions, so our tests must account for this to ensure compatibility.\n\n7. **Performance Considerations**: The overhead of creating many test instances might affect the performance of our test suite, especially if we are testing in environments with limited resources.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1901,
+    "completion_tokens": 248,
+    "total_tokens": 2149,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:03:55] INFO     Initial Population, Coverage: 0.100000                                                                                              searchobserver.py:68
+STATUS: 200
+RESPONSE: {
+  "id": "chatcmpl-DbyUYrX2MrQwrpk4gyUl13GtMhfOL",
+  "object": "chat.completion",
+  "created": 1777943038,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\"\"\"\n1. **Understanding the Context**: It may be challenging to determine what types of objects are instance methods and how to create such objects for testing.\n\n2. **Creating Test Objects**: To properly test `ismethod`, it will require setting up a class and creating instances of that class to get instance methods, which adds complexity.\n\n3. **Mocking and Isolation**: Testing might need to deal with different types of callable objects, so isolating the tests from other influences can be difficult.\n\n4. **Different Python Versions**: The behavior of methods may vary across different Python versions, making it necessary to ensure that tests run consistently across environments.\n\n5. **Edge Cases**: Identifying and covering edge cases, such as testing with bound methods, unbound methods, and methods that have different properties, can be complex.\n\n6. **Type Consistency**: Ensuring that the test cases provide the correct type of objects to `ismethod`, since providing incorrect types can lead to confusing results or false negatives.\n\n7. **Verify Output**: When testing, it may not always be straightforward to assert the expected output since the `ismethod` function returns a boolean value.\n\n8. **Test Framework Considerations**: Integrating the tests into an existing framework might require additional setup, especially if specific libraries or assertion mechanisms are needed.\n\"\"\"",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1902,
+    "completion_tokens": 272,
+    "total_tokens": 2174,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_b9ca58c2f4"
+}
+
+[02:04:10] INFO     Initial Population, Coverage: 0.160000                                                                                       searchobserver.py:68
+           INFO     Initial Population, Coverage: 0.160000                                                                                       searchobserver.py:68
+           INFO     Stopping condition reached                                                                                                       generator.py:395
+           INFO     Used search time: 101/90                                                                                                         generator.py:397
+           INFO     Stop generating test cases                                                                                                       generator.py:398
+           INFO     Start generating assertions                                                                                                      generator.py:420
+           INFO     Setup mutation controller                                                                                                   mutationadapter.py:68
+           INFO     Build AST for _inspect_d                                                                                                    mutationadapter.py:54
+           INFO     Mutate module _inspect_d                                                                                                    mutationadapter.py:56
+[02:04:11] INFO     Generated 108 mutants                                                                                                       mutationadapter.py:64
+           INFO     Running tests on mutant   1/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   2/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   3/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   4/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   5/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   6/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   7/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   8/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant   9/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  10/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  11/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  12/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  13/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  14/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  15/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  16/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  17/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  18/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  19/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  20/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  21/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  22/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  23/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  24/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  25/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  26/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  27/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  28/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  29/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  30/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  31/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  32/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  33/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  34/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  35/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  36/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  37/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  38/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  39/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  40/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  41/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  42/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  43/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  44/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  45/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  46/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  47/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  48/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  49/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  50/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  51/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  52/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  53/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  54/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  55/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  56/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  57/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  58/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  59/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  60/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  61/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  62/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  63/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  64/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  65/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  66/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  67/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  68/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  69/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  70/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  71/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  72/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  73/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  74/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  75/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  76/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  77/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  78/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  79/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  80/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  81/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  82/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  83/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  84/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  85/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  86/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  87/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  88/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  89/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  90/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  91/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  92/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  93/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  94/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  95/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  96/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  97/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  98/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant  99/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 100/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 101/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 102/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 103/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 104/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 105/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 106/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 107/108                                                                                         assertiongenerator.py:157
+           INFO     Running tests on mutant 108/108                                                                                         assertiongenerator.py:157
+           INFO     Export 0 successful test cases to ./pytLMtester/generated_tests/run_20260505_015947/numpy/_inspect/test__inspect_d.py            generator.py:437
+           INFO     Export 3 failing test cases to ./pytLMtester/generated_tests/run_20260505_015947/numpy/_inspect/test__inspect_d_failing.py       generator.py:447
+           INFO     Writing statistics                                                                                                              statistics.py:354
+           INFO     Stop Pynguin Test Generation…                                                                                                    generator.py:102

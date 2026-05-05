@@ -69,7 +69,7 @@ def _openai_api_legacy_request(self, function_header, context, id, difficult_con
     # TODO: remove this function as part of Issue #19
     url = f"{self._model_base_url}/chat/completions"
     # payload = {
-    #     "model": "deepseek-coder",
+    #     "model": self.complete_model,
     #     "id": id,
     #     "messages": [
     #         {"role": "system", "content": "You are a helpful assistant."},
@@ -81,8 +81,8 @@ def _openai_api_legacy_request(self, function_header, context, id, difficult_con
     #     # "stop": ["\n# Unit test for", "\ndef ", "\nclass "],  # 停止词会导致没有正确的输出，暂时先去掉
     # }
     payload = {
-        "model": "deepseek-coder",
-        "id": id,
+        "model": self.complete_model,
+        # "id": id,
         # "prompt": context + "\n" + function_header,
         "messages": [
             {"role": "system", "content": "You are a Python expert. Provide in the form of pytest style assertions. Only generate test cases within the function header I gave you. Only 10 test cases need to be generated. There are the following difficulties when generating test cases\n" + difficult_content},
@@ -103,7 +103,7 @@ def _openai_api_legacy_request_per(self, function_header, context):
     # TODO: remove this function as part of Issue #19
     url = f"{self._model_base_url}/chat/completions"
     payload = {
-        "model": "deepseek-coder",
+        "model": self.complete_model,
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": context + "\n" + function_header + "\n" + "Based on the above code content, if you want to generate the required test cases, what difficulties will there be? Please list the difficulties in an organized manner, simplify the language as much as possible, and enclose the content of the difficulties in three quotation(\"\"\") marks. "}
@@ -346,14 +346,20 @@ class _OpenAILanguageModel:
         context = self._get_maximal_source_context(context_start, context_end)
         url0, payload0, headers0 = _openai_api_legacy_request_per(self, function_header, context)
         res_per = requests.post(url0, data=json.dumps(payload0), headers=headers0)
-        difficult_content = extract_triple_quoted_string(res_per.json()['choices'][0]['message']['content'])
 
-        print("payload0:----------------------")
-        print(json.dumps(payload0))
-        print("res_per:-----------------------")
-        print(res_per.json())
-        print("difficult_content:----------------------")
-        print(difficult_content)
+        print("STATUS:", res_per.status_code)
+        print("RESPONSE:", res_per.text)
+
+        difficult_content = extract_triple_quoted_string(
+            res_per.json()["choices"][0]["message"]["content"]
+        )
+
+        # print("payload0:----------------------")
+        # print(json.dumps(payload0))
+        # print("res_per:-----------------------")
+        # print(res_per.json())
+        # print("difficult_content:----------------------")
+        # print(difficult_content)
 
 
         url, payload, headers = _openai_api_legacy_request(
@@ -363,20 +369,20 @@ class _OpenAILanguageModel:
 
 
         time_start = time.time()
-        print("url:--------------------------")
-        print(url)
-        print("payload:--------------------------")
-        print(json.dumps(payload))
-        print("headers:--------------------------")
-        print(headers)
+        # print("url:--------------------------")
+        # print(url)
+        # print("payload:--------------------------")
+        # print(json.dumps(payload))
+        # print("headers:--------------------------")
+        # print(headers)
 
-        print("res per:--------------------------")
-        print(res_per.json())
+        # print("res per:--------------------------")
+        # print(res_per.json())
         res = requests.post(url, data=json.dumps(payload), headers=headers)
         # print(res.status_code)
-        print("res-------------------------------")
-        print(res.json())
-        print(extract_python_code(res.json()['choices'][0]['message']['content']))
+        # print("res-------------------------------")
+        # print(res.json())
+        # print(extract_python_code(res.json()['choices'][0]['message']['content']))
         self.time_calling_codex += time.time() - time_start
         self.num_codex_calls += 1
         stat.track_output_variable(RuntimeVariable.LLMCalls, self.num_codex_calls)

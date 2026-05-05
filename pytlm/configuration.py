@@ -8,6 +8,7 @@
 import dataclasses
 import enum
 import time
+import os
 
 from pynguin.utils.statistics.runtimevariable import RuntimeVariable
 
@@ -258,12 +259,12 @@ class SeedingConfiguration:
     """Should the generator use a static constant seeding technique to improve constant
     generation?"""
 
-    large_language_model_seeding: bool = False
+    large_language_model_seeding: bool = True
     """If set to True, assume we want to use an OpenAI large language
     model to conduct seeding.
     """
 
-    large_language_model_mutation: bool = False
+    large_language_model_mutation: bool = True
     """If set to True, assume we want to use an OpenAI large language
     model to conduct mutation
     """
@@ -332,18 +333,18 @@ class SeedingConfiguration:
 class pytLMConfiguration:
     """Configuration for CodaMosa"""
 
-    authorization_key: str = ""
+    authorization_key: str = os.environ.get("OPENAI_API_KEY", "")
     """The authorization key to call OpenAI with"""
 
-    model_name: str = ""
+    model_name: str = "gpt-4o-mini"
     """The OpenAI Model to use for completions"""
 
-    model_base_url: str = ""
+    model_base_url: str = "https://api.openai.com/v1"
     """The base url used to interact with the model.
     Put together, model_base_url and model_relative_url describe
     the url for the model"""
 
-    model_relative_url: str = ""
+    model_relative_url: str = "/chat/completions"
     """The relative url used to interact with the model.
     Put together, model_base_url and model_relative_url describe
     the url for the model"""

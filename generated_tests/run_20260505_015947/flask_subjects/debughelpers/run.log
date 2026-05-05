@@ -1,0 +1,415 @@
+content内容: 
+b'from __future__ import annotations\n\nimport typing as t\n\nfrom jinja2.loaders import BaseLoader\nfrom werkzeug.routing import RequestRedirect\n\nfrom .blueprints import Blueprint\nfrom .globals import _cv_app\nfrom .sansio.app import App\n\nif t.TYPE_CHECKING:\n    from .sansio.scaffold import Scaffold\n    from .wrappers import Request\n\n\nclass UnexpectedUnicodeError(AssertionError, UnicodeError):\n    """Raised in places where we want some better error reporting for\n    unexpected unicode or binary data.\n    """\n\n\nclass DebugFilesKeyError(KeyError, AssertionError):\n    """Raised from request.files during debugging.  The idea is that it can\n    provide a better error message than just a generic KeyError/BadRequest.\n    """\n\n    def __init__(self, request: Request, key: str) -> None:\n        form_matches = request.form.getlist(key)\n        buf = [\n            f"You tried to access the file {key!r} in the request.files"\n            " dictionary but it does not exist. The mimetype for the"\n            f" request is {request.mimetype!r} instead of"\n            " \'multipart/form-data\' which means that no file contents"\n            " were transmitted. To fix this error you should provide"\n            \' enctype="multipart/form-data" in your form.\'\n        ]\n        if form_matches:\n            names = ", ".join(repr(x) for x in form_matches)\n            buf.append(\n                "\\n\\nThe browser instead transmitted some file names. "\n                f"This was submitted: {names}"\n            )\n        self.msg = "".join(buf)\n\n    def __str__(self) -> str:\n        return self.msg\n\n\nclass FormDataRoutingRedirect(AssertionError):\n    """This exception is raised in debug mode if a routing redirect\n    would cause the browser to drop the method or body. This happens\n    when method is not GET, HEAD or OPTIONS and the status code is not\n    307 or 308.\n    """\n\n    def __init__(self, request: Request) -> None:\n        exc = request.routing_exception\n        assert isinstance(exc, RequestRedirect)\n        buf = [\n            f"A request was sent to \'{request.url}\', but routing issued"\n            f" a redirect to the canonical URL \'{exc.new_url}\'."\n        ]\n\n        if f"{request.base_url}/" == exc.new_url.partition("?")[0]:\n            buf.append(\n                " The URL was defined with a trailing slash. Flask"\n                " will redirect to the URL with a trailing slash if it"\n                " was accessed without one."\n            )\n\n        buf.append(\n            " Send requests to the canonical URL, or use 307 or 308 for"\n            " routing redirects. Otherwise, browsers will drop form"\n            " data.\\n\\n"\n            "This exception is only raised in debug mode."\n        )\n        super().__init__("".join(buf))\n\n\ndef attach_enctype_error_multidict(request: Request) -> None:\n    """Patch ``request.files.__getitem__`` to raise a descriptive error\n    about ``enctype=multipart/form-data``.\n\n    :param request: The request to patch.\n    :meta private:\n    """\n    oldcls = request.files.__class__\n\n    class newcls(oldcls):  # type: ignore[valid-type, misc]\n        def __getitem__(self, key: str) -> t.Any:\n            try:\n                return super().__getitem__(key)\n            except KeyError as e:\n                if key not in request.form:\n                    raise\n\n                raise DebugFilesKeyError(request, key).with_traceback(\n                    e.__traceback__\n                ) from None\n\n    newcls.__name__ = oldcls.__name__\n    newcls.__module__ = oldcls.__module__\n    request.files.__class__ = newcls\n\n\ndef _dump_loader_info(loader: BaseLoader) -> t.Iterator[str]:\n    yield f"class: {type(loader).__module__}.{type(loader).__name__}"\n    for key, value in sorted(loader.__dict__.items()):\n        if key.startswith("_"):\n            continue\n        if isinstance(value, (tuple, list)):\n            if not all(isinstance(x, str) for x in value):\n                continue\n            yield f"{key}:"\n            for item in value:\n                yield f"  - {item}"\n            continue\n        elif not isinstance(value, (str, int, float, bool)):\n            continue\n        yield f"{key}: {value!r}"\n\n\ndef explain_template_loading_attempts(\n    app: App,\n    template: str,\n    attempts: list[\n        tuple[\n            BaseLoader,\n            Scaffold,\n            tuple[str, str | None, t.Callable[[], bool] | None] | None,\n        ]\n    ],\n) -> None:\n    """This should help developers understand what failed"""\n    info = [f"Locating template {template!r}:"]\n    total_found = 0\n    blueprint = None\n\n    if (ctx := _cv_app.get(None)) is not None and ctx.has_request:\n        blueprint = ctx.request.blueprint\n\n    for idx, (loader, srcobj, triple) in enumerate(attempts):\n        if isinstance(srcobj, App):\n            src_info = f"application {srcobj.import_name!r}"\n        elif isinstance(srcobj, Blueprint):\n            src_info = f"blueprint {srcobj.name!r} ({srcobj.import_name})"\n        else:\n            src_info = repr(srcobj)\n\n        info.append(f"{idx + 1:5}: trying loader of {src_info}")\n\n        for line in _dump_loader_info(loader):\n            info.append(f"       {line}")\n\n        if triple is None:\n            detail = "no match"\n        else:\n            detail = f"found ({triple[1] or \'<string>\'!r})"\n            total_found += 1\n        info.append(f"       -> {detail}")\n\n    seems_fishy = False\n    if total_found == 0:\n        info.append("Error: the template could not be found.")\n        seems_fishy = True\n    elif total_found > 1:\n        info.append("Warning: multiple loaders returned a match for the template.")\n        seems_fishy = True\n\n    if blueprint is not None and seems_fishy:\n        info.append(\n            "  The template was looked up from an endpoint that belongs"\n            f" to the blueprint {blueprint!r}."\n        )\n        info.append("  Maybe you did not place a template in the right folder?")\n        info.append("  See https://flask.palletsprojects.com/blueprints/#templates")\n\n    app.logger.info("\\n".join(info))\n'
+[02:00:01] INFO     HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"                                                          _client.py:1026
+```python
+from __future__ import annotations
+
+import typing as t
+
+from jinja2.loaders import BaseLoader
+from werkzeug.routing import RequestRedirect
+
+from .blueprints import Blueprint
+from .globals import _cv_app
+from .sansio.app import App
+
+if t.TYPE_CHECKING:
+    from .sansio.scaffold import Scaffold
+    from .wrappers import Request
+
+
+class UnexpectedUnicodeError(AssertionError, UnicodeError):
+    """Raised in places where we want some better error reporting for
+    unexpected unicode or binary data.
+    """
+
+
+class DebugFilesKeyError(KeyError, AssertionError):
+    """Raised from request.files during debugging.  The idea is that it can
+    provide a better error message than just a generic KeyError/BadRequest.
+    """
+
+    def __init__(self, request: Request, key: str) -> None:
+        form_matches = request.form.getlist(key)
+        buf = [
+            f"You tried to access the file {key!r} in the request.files"
+            " dictionary but it does not exist. The mimetype for the"
+            f" request is {request.mimetype!r} instead of"
+            " 'multipart/form-data' which means that no file contents"
+            " were transmitted. To fix this error you should provide"
+            ' enctype="multipart/form-data" in your form.'
+        ]
+        if form_matches:
+            names = ", ".join(repr(x) for x in form_matches)
+            buf.append(
+                "\n\nThe browser instead transmitted some file names. "
+                f"This was submitted: {names}"
+            )
+        self.msg = "".join(buf)
+
+    def __str__(self) -> str:
+        return self.msg
+
+
+class FormDataRoutingRedirect(AssertionError):
+    """This exception is raised in debug mode if a routing redirect
+    would cause the browser to drop the method or body. This happens
+    when method is not GET, HEAD or OPTIONS and the status code is not
+    307 or 308.
+    """
+
+    def __init__(self, request: Request) -> None:
+        exc = request.routing_exception
+        assert isinstance(exc, RequestRedirect)
+        buf = [
+            f"A request was sent to '{request.url}', but routing issued"
+            f" a redirect to the canonical URL '{exc.new_url}'."
+        ]
+
+        if f"{request.base_url}/" == exc.new_url.partition("?")[0]:
+            buf.append(
+                " The URL was defined with a trailing slash. Flask"
+                " will redirect to the URL with a trailing slash if it"
+                " was accessed without one."
+            )
+
+        buf.append(
+            " Send requests to the canonical URL, or use 307 or 308 for"
+            " routing redirects. Otherwise, browsers will drop form"
+            " data.\n\n"
+            "This exception is only raised in debug mode."
+        )
+        super().__init__("".join(buf))
+
+
+def attach_enctype_error_multidict(request: Request) -> None:
+    """Patch ``request.files.__getitem__`` to raise a descriptive error
+    about ``enctype=multipart/form-data``.
+
+    :param request: The request to patch.
+    :meta private:
+    """
+    oldcls = request.files.__class__
+
+    class newcls(oldcls):  # type: ignore[valid-type, misc]
+        def __getitem__(self, key: str) -> t.Any:
+            try:
+                return super().__getitem__(key)
+            except KeyError as e:
+                if key not in request.form:
+                    raise
+
+                raise DebugFilesKeyError(request, key).with_traceback(
+                    e.__traceback__
+                ) from None
+
+    newcls.__name__ = oldcls.__name__
+    newcls.__module__ = oldcls.__module__
+    request.files.__class__ = newcls
+
+
+def _dump_loader_info(loader: BaseLoader) -> t.Iterator[str]:
+    yield f"class: {type(loader).__module__}.{type(loader).__name__}"
+    for key, value in sorted(loader.__dict__.items()):
+        if key.startswith("_"):
+            continue
+        if isinstance(value, (tuple, list)):
+            if not all(isinstance(x, str) for x in value):
+                continue
+            yield f"{key}:"
+            for item in value:
+                yield f"  - {item}"
+            continue
+        elif not isinstance(value, (str, int, float, bool)):
+            continue
+        yield f"{key}: {value!r}"
+
+
+def explain_template_loading_attempts(
+    app: App,
+    template: str,
+    attempts: list[
+        tuple[
+            BaseLoader,
+            Scaffold,
+            tuple[str, str | None, t.Callable[[], bool] | None] | None,
+        ]
+    ],
+) -> None:
+    """This should help developers understand what failed"""
+    info = [f"Locating template {template!r}:"]
+    total_found = 0
+    blueprint = None
+
+    if (ctx := _cv_app.get(None)) is not None and ctx.has_request:
+        blueprint = ctx.request.blueprint
+
+    for idx, (loader, srcobj, triple) in enumerate(attempts):
+        if isinstance(srcobj, App):
+            src_info = f"application {srcobj.import_name!r}"
+        elif isinstance(srcobj, Blueprint):
+            src_info = f"blueprint {srcobj.name!r} ({srcobj.import_name})"
+        else:
+            src_info = repr(srcobj)
+
+        info.append(f"{idx + 1:5}: trying loader of {src_info}")
+
+        for line in _dump_loader_info(loader):
+            info.append(f"       {line}")
+
+        if triple is None:
+            detail = "no match"
+        else:
+            detail = f"found ({triple[1] or '<string>'!r})"
+            total_found += 1
+        info.append(f"       -> {detail}")
+
+    seems_fishy = False
+    if total_found == 0:
+        info.append("Error: the template could not be found.")
+        seems_fishy = True
+    elif total_found > 1:
+        info.append("Warning: multiple loaders returned a match for the template.")
+        seems_fishy = True
+
+    if blueprint is not None and seems_fishy:
+        info.append(
+            "  The template was looked up from an endpoint that belongs"
+            f" to the blueprint {blueprint!r}."
+        )
+        info.append("  Maybe you did not place a template in the right folder?")
+        info.append("  See https://flask.palletsprojects.com/blueprints/#templates")
+
+    app.logger.info("\n".join(info))
+```
+new_content内容: 
+from __future__ import annotations
+
+import typing as t
+
+from jinja2.loaders import BaseLoader
+from werkzeug.routing import RequestRedirect
+
+from .blueprints import Blueprint
+from .globals import _cv_app
+from .sansio.app import App
+
+if t.TYPE_CHECKING:
+    from .sansio.scaffold import Scaffold
+    from .wrappers import Request
+
+
+class UnexpectedUnicodeError(AssertionError, UnicodeError):
+    """Raised in places where we want some better error reporting for
+    unexpected unicode or binary data.
+    """
+
+
+class DebugFilesKeyError(KeyError, AssertionError):
+    """Raised from request.files during debugging.  The idea is that it can
+    provide a better error message than just a generic KeyError/BadRequest.
+    """
+
+    def __init__(self, request: Request, key: str) -> None:
+        form_matches = request.form.getlist(key)
+        buf = [
+            f"You tried to access the file {key!r} in the request.files"
+            " dictionary but it does not exist. The mimetype for the"
+            f" request is {request.mimetype!r} instead of"
+            " 'multipart/form-data' which means that no file contents"
+            " were transmitted. To fix this error you should provide"
+            ' enctype="multipart/form-data" in your form.'
+        ]
+        if form_matches:
+            names = ", ".join(repr(x) for x in form_matches)
+            buf.append(
+                "\n\nThe browser instead transmitted some file names. "
+                f"This was submitted: {names}"
+            )
+        self.msg = "".join(buf)
+
+    def __str__(self) -> str:
+        return self.msg
+
+
+class FormDataRoutingRedirect(AssertionError):
+    """This exception is raised in debug mode if a routing redirect
+    would cause the browser to drop the method or body. This happens
+    when method is not GET, HEAD or OPTIONS and the status code is not
+    307 or 308.
+    """
+
+    def __init__(self, request: Request) -> None:
+        exc = request.routing_exception
+        assert isinstance(exc, RequestRedirect)
+        buf = [
+            f"A request was sent to '{request.url}', but routing issued"
+            f" a redirect to the canonical URL '{exc.new_url}'."
+        ]
+
+        if f"{request.base_url}/" == exc.new_url.partition("?")[0]:
+            buf.append(
+                " The URL was defined with a trailing slash. Flask"
+                " will redirect to the URL with a trailing slash if it"
+                " was accessed without one."
+            )
+
+        buf.append(
+            " Send requests to the canonical URL, or use 307 or 308 for"
+            " routing redirects. Otherwise, browsers will drop form"
+            " data.\n\n"
+            "This exception is only raised in debug mode."
+        )
+        super().__init__("".join(buf))
+
+
+def attach_enctype_error_multidict(request: Request) -> None:
+    """Patch ``request.files.__getitem__`` to raise a descriptive error
+    about ``enctype=multipart/form-data``.
+
+    :param request: The request to patch.
+    :meta private:
+    """
+    oldcls = request.files.__class__
+
+    class newcls(oldcls):  # type: ignore[valid-type, misc]
+        def __getitem__(self, key: str) -> t.Any:
+            try:
+                return super().__getitem__(key)
+            except KeyError as e:
+                if key not in request.form:
+                    raise
+
+                raise DebugFilesKeyError(request, key).with_traceback(
+                    e.__traceback__
+                ) from None
+
+    newcls.__name__ = oldcls.__name__
+    newcls.__module__ = oldcls.__module__
+    request.files.__class__ = newcls
+
+
+def _dump_loader_info(loader: BaseLoader) -> t.Iterator[str]:
+    yield f"class: {type(loader).__module__}.{type(loader).__name__}"
+    for key, value in sorted(loader.__dict__.items()):
+        if key.startswith("_"):
+            continue
+        if isinstance(value, (tuple, list)):
+            if not all(isinstance(x, str) for x in value):
+                continue
+            yield f"{key}:"
+            for item in value:
+                yield f"  - {item}"
+            continue
+        elif not isinstance(value, (str, int, float, bool)):
+            continue
+        yield f"{key}: {value!r}"
+
+
+def explain_template_loading_attempts(
+    app: App,
+    template: str,
+    attempts: list[
+        tuple[
+            BaseLoader,
+            Scaffold,
+            tuple[str, str | None, t.Callable[[], bool] | None] | None,
+        ]
+    ],
+) -> None:
+    """This should help developers understand what failed"""
+    info = [f"Locating template {template!r}:"]
+    total_found = 0
+    blueprint = None
+
+    if (ctx := _cv_app.get(None)) is not None and ctx.has_request:
+        blueprint = ctx.request.blueprint
+
+    for idx, (loader, srcobj, triple) in enumerate(attempts):
+        if isinstance(srcobj, App):
+            src_info = f"application {srcobj.import_name!r}"
+        elif isinstance(srcobj, Blueprint):
+            src_info = f"blueprint {srcobj.name!r} ({srcobj.import_name})"
+        else:
+            src_info = repr(srcobj)
+
+        info.append(f"{idx + 1:5}: trying loader of {src_info}")
+
+        for line in _dump_loader_info(loader):
+            info.append(f"       {line}")
+
+        if triple is None:
+            detail = "no match"
+        else:
+            detail = f"found ({triple[1] or '<string>'!r})"
+            total_found += 1
+        info.append(f"       -> {detail}")
+
+    seems_fishy = False
+    if total_found == 0:
+        info.append("Error: the template could not be found.")
+        seems_fishy = True
+    elif total_found > 1:
+        info.append("Warning: multiple loaders returned a match for the template.")
+        seems_fishy = True
+
+    if blueprint is not None and seems_fishy:
+        info.append(
+            "  The template was looked up from an endpoint that belongs"
+            f" to the blueprint {blueprint!r}."
+        )
+        info.append("  Maybe you did not place a template in the right folder?")
+        info.append("  See https://flask.palletsprojects.com/blueprints/#templates")
+
+    app.logger.info("\n".join(info))
+           INFO     Start Pynguin Test Generation…                                                                                                           generator.py:99
+           ERROR    Failed to load SUT: No module named 'werkzeug'                                                                                          generator.py:152
+                    ╭───────────────────────────────────────────────── Traceback (most recent call last) ─────────────────────────────────────────────────╮                 
+                    │ /home/mda21nd/Turing-Project/pynguin/generator.py:148 in _load_sut                                                                  │                 
+                    │                                                                                                                                     │                 
+                    │   145 │   try:                                                                                                                      │                 
+                    │   146 │   │   # We need to set the current thread ident so the import trace is recorded.                                            │                 
+                    │   147 │   │   tracer.current_thread_identifier = threading.current_thread().ident                                                   │                 
+                    │ ❱ 148 │   │   importlib.import_module(config.configuration.module_name)                                                             │                 
+                    │   149 │   except ImportError as ex:                                                                                                 │                 
+                    │   150 │   │   # A module could not be imported because some dependencies                                                            │                 
+                    │   151 │   │   # are missing or it is malformed                                                                                      │                 
+                    │                                                                                                                                     │                 
+                    │ /home/mda21nd/.pyenv/versions/3.10.14/lib/python3.10/importlib/__init__.py:126 in import_module                                     │                 
+                    │                                                                                                                                     │                 
+                    │   123 │   │   │   if character != '.':                                                                                              │                 
+                    │   124 │   │   │   │   break                                                                                                         │                 
+                    │   125 │   │   │   level += 1                                                                                                        │                 
+                    │ ❱ 126 │   return _bootstrap._gcd_import(name[level:], package, level)                                                               │                 
+                    │   127                                                                                                                               │                 
+                    │   128                                                                                                                               │                 
+                    │   129 _RELOADING = {}                                                                                                               │                 
+                    │ <frozen importlib._bootstrap>:1050 in _gcd_import                                                                                   │                 
+                    │ <frozen importlib._bootstrap>:1027 in _find_and_load                                                                                │                 
+                    │ <frozen importlib._bootstrap>:1006 in _find_and_load_unlocked                                                                       │                 
+                    │ <frozen importlib._bootstrap>:688 in _load_unlocked                                                                                 │                 
+                    │                                                                                                                                     │                 
+                    │ /home/mda21nd/Turing-Project/pynguin/instrumentation/machinery.py:44 in exec_module                                                 │                 
+                    │                                                                                                                                     │                 
+                    │    41 │                                                                                                                             │                 
+                    │    42 │   def exec_module(self, module):                                                                                            │                 
+                    │    43 │   │   self._tracer.reset()                                                                                                  │                 
+                    │ ❱  44 │   │   super().exec_module(module)                                                                                           │                 
+                    │    45 │   │   self._tracer.store_import_trace()                                                                                     │                 
+                    │    46 │                                                                                                                             │                 
+                    │    47 │   def get_code(self, fullname) -> CodeType:                                                                                 │                 
+                    │ <frozen importlib._bootstrap_external>:883 in exec_module                                                                           │                 
+                    │ <frozen importlib._bootstrap>:241 in _call_with_frames_removed                                                                      │                 
+                    │                                                                                                                                     │                 
+                    │ /home/mda21nd/Turing-Project/./subjects/flask_subjects/debughelpers_d.py:6 in <module>                                              │                 
+                    │                                                                                                                                     │                 
+                    │     3 import typing as t                                                                                                            │                 
+                    │     4                                                                                                                               │                 
+                    │     5 from jinja2.loaders import BaseLoader                                                                                         │                 
+                    │ ❱   6 from werkzeug.routing import RequestRedirect                                                                                  │                 
+                    │     7                                                                                                                               │                 
+                    │     8 from .blueprints import Blueprint                                                                                             │                 
+                    │     9 from .globals import _cv_app                                                                                                  │                 
+                    ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯                 
+                    ModuleNotFoundError: No module named 'werkzeug'                                                                                                         
+           INFO     Stop Pynguin Test Generation…                                                                                                           generator.py:102

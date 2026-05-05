@@ -69,8 +69,8 @@ class LogSearchObserver(SearchObserver):
         log_message = "Iteration: %7i, Coverage: %5f" % (self.iteration, initial.get_coverage())
         dirr = config.configuration.project_path
         last_part = dirr.rstrip("\\").split("\\")[-1]
-        log_file = os.path.join("E:\\time\\pytLMtester_test\\" + last_part,
-                                config.configuration.module_name + ".txt")
+        log_file = os.path.join("pytLM_logs", last_part,
+                        config.configuration.module_name + ".txt")
         import time
         timestamp = int(time.time())
         timestamp_str = time.strftime("%Y%m%d-%H%M%S")
@@ -91,8 +91,8 @@ class LogSearchObserver(SearchObserver):
         )
         log_message = "Iteration: %7i, Coverage: %5f" % (self.iteration, best.get_coverage())
         dirr = config.configuration.project_path
-        last_part = dirr.rstrip("\\").split("\\")[-1]
-        log_file = os.path.join("E:\\time\\pytLM_test\\" + last_part,
+        last_part = os.path.basename(dirr)
+        log_file = os.path.join("pytLM_logs", last_part,
                                 config.configuration.module_name + ".txt")
 
         import time

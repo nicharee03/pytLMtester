@@ -5,8 +5,8 @@ import pynguin.configuration as config
 import openai
 import pynguin.configuration as config
 
-openai.api_key = ""
-openai.base_url = "https://api.deepseek.com"
+openai.api_key = os.environ.get("OPENAI_API_KEY", "")
+openai.base_url = "https://api.openai.com/v1"
 
 # 修复已经被标记为错误的测试用例
 def fix_xfail():
@@ -89,7 +89,7 @@ def generator_fail_function_file(deal_file, fail_function): #
 # 使用大模型对测试套件进行修复
 def LLM_fix(new_content):
     completion = openai.chat.completions.create(
-        model="deepseek-coder",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user",
