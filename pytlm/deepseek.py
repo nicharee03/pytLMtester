@@ -20,7 +20,7 @@ def extract_python_code(input_string):
 
 def code_deepseek(source_code):
     completion = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {
@@ -32,7 +32,15 @@ def code_deepseek(source_code):
         temperature=0,
     )
 
+    if completion.usage is not None:
+        print(
+            f"TOKENS step=code_deepseek "
+            f"model={completion.model} "
+            f"prompt={completion.usage.prompt_tokens} "
+            f"completion={completion.usage.completion_tokens} "
+            f"total={completion.usage.total_tokens}"
+        )
+
     content = completion.choices[0].message.content
     print(content)
     return extract_python_code(content)
-    

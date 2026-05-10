@@ -8,6 +8,16 @@ import pynguin.configuration as config
 openai.api_key = os.environ.get("OPENAI_API_KEY", "")
 openai.base_url = "https://api.openai.com/v1"
 
+def log_usage(completion, step):
+    if completion.usage is not None:
+        print(
+            f"TOKENS step={step} "
+            f"model={completion.model} "
+            f"prompt={completion.usage.prompt_tokens} "
+            f"completion={completion.usage.completion_tokens} "
+            f"total={completion.usage.total_tokens}"
+        )
+
 # 修复已经被标记为错误的测试用例
 def fix_xfail():
     a = 0
@@ -97,6 +107,9 @@ def LLM_fix(new_content):
 
         ],
     )
+    
+    log_usage(completion, "LLM_fix")
+
     explanation_response_str = "\n".join([str(item) for item in completion])
 
     content = completion.choices[0].message.content
@@ -127,7 +140,7 @@ def check_syntax(content):
 # 使用大模型进行语法修复
 def fix_syntax_error_LLM(content):
     completion = openai.chat.completions.create(
-        model="deepseek-coder",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user",
@@ -135,6 +148,19 @@ def fix_syntax_error_LLM(content):
 
         ],
     )
+
+    log_usage(completion, "fix_syntax_error_LLM")
+
+    explanation_response_str = "\n".join([str(item) for item in completion])
+
+    content = completion.choices[0].message.content
+
+    print(completion.choices[0].message.content)
+
+    return content
+            f"total={response.usage.total_tokens}"
+        )
+
     explanation_response_str = "\n".join([str(item) for item in completion])
 
     content = completion.choices[0].message.content
@@ -161,7 +187,7 @@ def extract_python_code(content):
 
 def LLM_fix_runtimeerror(content, module_name, project_path):
     completion = openai.chat.completions.create(
-        model="deepseek-coder",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user",
@@ -169,6 +195,9 @@ def LLM_fix_runtimeerror(content, module_name, project_path):
 
         ],
     )
+
+    log_usage(completion, "LLM_fix_runtimeerror")
+
     explanation_response_str = "\n".join([str(item) for item in completion])
 
     content = completion.choices[0].message.content
@@ -179,7 +208,7 @@ def LLM_fix_runtimeerror(content, module_name, project_path):
 
 def LLM_fix_runtimeerror2(content, module_name, project_path):
     completion = openai.chat.completions.create(
-        model="deepseek-coder",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user",
@@ -187,6 +216,9 @@ def LLM_fix_runtimeerror2(content, module_name, project_path):
 
         ],
     )
+
+    log_usage(completion, "LLM_fix_runtimeerror2")
+
     explanation_response_str = "\n".join([str(item) for item in completion])
 
     content = completion.choices[0].message.content
@@ -197,7 +229,7 @@ def LLM_fix_runtimeerror2(content, module_name, project_path):
 
 def LLM_fix_expected_behavior(content):
     completion = openai.chat.completions.create(
-        model="deepseek-coder",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user",
@@ -205,6 +237,9 @@ def LLM_fix_expected_behavior(content):
 
         ],
     )
+
+    log_usage(completion, "LLM_fix_expected_behavior")
+
     explanation_response_str = "\n".join([str(item) for item in completion])
 
     content = completion.choices[0].message.content

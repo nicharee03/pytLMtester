@@ -106,11 +106,11 @@ def count_token(prompt):
     # else:
     #     return False
 
-def generate_class_type(content):
-    client = OpenAI(api_key="sk-08f1d963b97246a696f5fbb498304df3", base_url="https://api.deepseek.com")
+def generate_class_type(content, token_log_path=None):
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
     response = client.chat.completions.create(
-        model="deepseek-chat",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a python coder"},
             {"role": "user", "content": content + "\n Please help me indicate the parameter type and return type for each function and class in this code, and output the modified code to me."},
@@ -118,7 +118,14 @@ def generate_class_type(content):
         stream=False
     )
 
-    # print(response.choices[0].message.content)
+    if response.usage is not None:
+        print(
+            f"TOKENS "
+            f"prompt={response.usage.prompt_tokens} "
+            f"completion={response.usage.completion_tokens} "
+            f"total={response.usage.total_tokens}"
+        )
+
     return response.choices[0].message.content
 
 
